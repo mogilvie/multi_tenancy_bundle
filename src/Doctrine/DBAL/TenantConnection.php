@@ -12,8 +12,6 @@ use Doctrine\DBAL\Exception;
  */
 class TenantConnection extends Connection
 {
-    /** @var mixed */
-    protected array $params = [];
     /** @var bool */
     protected bool $isConnected = false;
     /** @var bool */
@@ -25,8 +23,15 @@ class TenantConnection extends Connection
      */
     public function switchConnection(array $params): bool
     {
-        $this->_conn = $this->_driver->connect($params);
+        if ($this->isConnected()) {
+            $this->close();
+        }
 
+        $existingParams = $this->getParams();
+        $params = array_merge($existingParams, $newParams);
+
+        $connection = parent::__construct($params, $this->_driver, $this->_config, $this->_eventManager);
+        
         if ($this->autoCommit === false) {
             $this->beginTransaction();
         }
