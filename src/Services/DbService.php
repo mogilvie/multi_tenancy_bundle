@@ -82,7 +82,7 @@ class DbService
      *
      * @param int $UserDbId The tenant database ID.
      */
-    public function createSchemaInDb(int $UserDbId): void
+    public function createSchemaInDb(string|int $UserDbId): void
     {
         $metadata = $this->tenantEntityManager->getMetadataFactory()->getAllMetadata();
 
