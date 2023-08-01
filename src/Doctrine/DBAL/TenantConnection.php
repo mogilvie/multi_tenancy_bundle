@@ -21,7 +21,7 @@ class TenantConnection extends Connection
      * @return bool
      * @throws Exception
      */
-    public function switchConnection(array $params): bool
+    public function switchConnection(array $newParams): bool
     {
         if ($this->isConnected()) {
             $this->close();
