@@ -118,7 +118,7 @@ class DbService
 
             // Begin the transaction
             $tenantConnection->beginTransaction();
-            $tenantConnection->setAutoCommit(false);
+            // $tenantConnection->setAutoCommit(false);
 
             try {
                 // Get all entity classes
@@ -137,7 +137,7 @@ class DbService
                     }
                 }
                 // Commit the transaction
-                $tenantConnection->commit();
+                // $tenantConnection->commit();
             } catch (\Exception $e) {
                 // Ensure the connection is active before rolling back
                 $tenantConnection->rollBack();
