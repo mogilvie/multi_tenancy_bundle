@@ -5,6 +5,8 @@ namespace Hakam\MultiTenancyBundle\Services;
 use Doctrine\Common\Annotations\AnnotationReader;
 use Doctrine\Common\Annotations\AnnotationRegistry;
 use Doctrine\Common\Cache\Psr6\DoctrineProvider;
+use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Driver;
 use Doctrine\ORM\Configuration;
 use Doctrine\DBAL\Driver\AbstractMySQLDriver;
 use Doctrine\DBAL\Driver\AbstractPostgreSQLDriver;
@@ -43,7 +45,7 @@ class DbService
     {
     }
 
-    public function createDatabase(string $dbName): int
+    public function createManagementConnection(): Connection
     {
         // Central management connection credentials (e.g., 'mysql' database for MySQL)
         $managementDbCredentials = $this->dbCredentials;
@@ -53,18 +55,47 @@ class DbService
         $dsnParser = new DsnParser(['mysql' => 'pdo_mysql']);
         $managementConnection = DriverManager::getConnection($dsnParser->parse($managementDbCredentials['db_url']));
 
-        try {
-            $platform = $managementConnection->getDatabasePlatform();
-            if ($managementConnection->getDriver() instanceof AbstractMySQLDriver || $managementConnection->getDriver() instanceof AbstractPostgreSQLDriver) {
-                $sql = $platform->getListDatabasesSQL();
-            } else {
-                // Support SQLite and other databases
-                $sql = 'SELECT name FROM sqlite_master WHERE type = "database"';
-            }
-            $statement = $managementConnection->executeQuery($sql);
-            $databaseList = $statement->fetchFirstColumn();
+        return $managementConnection;
+    }
 
-            if (in_array($dbName, $databaseList)) {
+    public function checkDbExists(string $dbName, ?Connection $managementConnection = null, ?bool $closeConnection = true)
+    {
+
+        if(null === $managementConnection) {
+            $managementConnection = $this->createManagementConnection();
+        }
+
+        $platform = $managementConnection->getDatabasePlatform();
+
+        if ($managementConnection->getDriver() instanceof AbstractMySQLDriver || $managementConnection->getDriver() instanceof AbstractPostgreSQLDriver) {
+            $sql = $platform->getListDatabasesSQL();
+        } else {
+            // Support SQLite and other databases
+            $sql = 'SELECT name FROM sqlite_master WHERE type = "database"';
+        }
+        $statement = $managementConnection->executeQuery($sql);
+        $databaseList = $statement->fetchFirstColumn();
+
+        if($closeConnection){
+            $managementConnection->close();
+        }
+
+        if (in_array($dbName, $databaseList)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    public function createDatabase(string $dbName): int
+    {
+        // Central management connection credentials (e.g., 'mysql' database for MySQL)
+        $managementConnection = $this->createManagementConnection();
+
+        try {
+            $dbExists = $this->checkDbExists($dbName, $managementConnection, false);
+
+            if ($dbExists) {
                 throw new MultiTenancyException(sprintf('Database %s already exists.', $dbName), Response::HTTP_BAD_REQUEST);
             }
 
@@ -86,22 +117,14 @@ class DbService
         $entityManager = $this->tenantEntityManager;
 
         $tenantConfiguration = $entityManager->getConfiguration();
-        // Central management connection credentials (e.g., 'mysql' database for MySQL)
-        $managementDbCredentials = $this->dbCredentials;
-        $managementDbCredentials['dbname'] = 'mysql'; // or the appropriate central database name
 
-        // Establish a connection to the central management database
-        $dsnParser = new DsnParser(['mysql' => 'pdo_mysql']);
-        $managementConnection = DriverManager::getConnection($dsnParser->parse($managementDbCredentials['db_url']));
+        $managementConnection = $this->createManagementConnection($dbName);
 
         try {
             // Check if the tenant database exists
-            $platform = $managementConnection->getDatabasePlatform();
-            $sql = $platform->getListDatabasesSQL();
-            $statement = $managementConnection->executeQuery($sql);
-            $databaseList = $statement->fetchFirstColumn();
+            $dbExists = $this->checkDbExists($dbName, $managementConnection, false);
 
-            if (!in_array($dbName, $databaseList)) {
+            if (!$dbExists) {
                 throw new MultiTenancyException(sprintf('Database %s does not exist.', $dbName), Response::HTTP_BAD_REQUEST);
             }
 
@@ -152,43 +175,6 @@ class DbService
         } finally {
             // Ensure the management connection is closed
             $managementConnection->close();
-        }
-    }
-
-    /**
-     * Creates a schema in the specified tenant database.
-     *
-     * @param int $UserDbId The tenant database ID.
-     */
-    public function createSchemaInDBOld(int $UserDbId): void
-    {
-        $this->eventDispatcher->dispatch(new SwitchDbEvent($UserDbId));
-
-        $entityManager = $this->tenantEntityManager;
-
-        try {
-            $entityManager->beginTransaction(); // Begin the transaction
-
-            $schemaTool = new SchemaTool($entityManager);
-
-            $metadata = $entityManager->getMetadataFactory()->getAllMetadata();
-
-            $sqls = $schemaTool->getUpdateSchemaSql($metadata, true);
-
-            if (empty($sqls)) {
-                return;
-            }
-
-            $schemaTool->updateSchema($metadata);
-
-            $entityManager->commit(); // Commit the transaction
-        } catch (\PDOException $e) {
-
-        } catch (\Exception $e) {
-            $entityManager->rollback(); // Rollback the transaction on error
-            throw $e; // Rethrow the exception after rollback
-        } finally {
-            $entityManager->close(); // Close the entity manager
         }
     }
 
